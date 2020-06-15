@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from skimage import io, transform, color
+from skimage import io, transform, color, img_as_float64
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 from torch.optim.lr_scheduler import StepLR
@@ -21,7 +21,7 @@ import time
 
 
 ### Add integer label to the dataframe
-def add_label(df1,df2):
+def add_label(df, df1,df2,df3):
 
     '''
     Attach a new column named Label to the dataframe:
@@ -32,36 +32,79 @@ def add_label(df1,df2):
     Return:
         df (pandas.Dataframe): the new df with int labels
     '''
-    classes = pd.Series(df1['scientific_name'].value_counts().keys(), index=[_ for _ in range(len(df1['scientific_name'].value_counts().keys()))])
+    classes = df['scientific_name']
     labels1 = []
     labels2 = []
-    for i in range(len(df1)):
-        class_name = df1['scientific_name'][i]
-        #print(class_name,classes,classes[classes == class_name])
-        labels1.append(classes[classes == class_name].index[0])
+    labels3 = []
+    remove1 = []
+    remove2 = []
+    remove3 = []
+    data_address = "../snake-species-identification-challenge/data/"
+    print("start df3")
+    found = 0
+    for i in range(len(df3)):
+        if i % 10 == 0:
+            print(i)
+        img_name = os.path.join("../snake-species-identification-challenge/data/validate_images_small/",(df3['hashed_id'][i]+'.jpg'))  
+        img = io.imread(img_name)
+        class_name = df3['scientific_name'][i]
+        if len(img.shape) == 2:
+            found += 1
+            df3 = df3.drop(df3.index[i])
+        labels3.append(classes[classes == class_name].index[0])
+    print(found)
+    df3['Label'] = labels3
+    df3.to_csv(os.path.join(data_address,'processed_validate_labels_small.csv'))
+    
+    print("start df2")
+    found = 0
     for i in range(len(df2)):
+        if i % 1000 == 0:
+            print(i)
+        img_name = os.path.join("../snake-species-identification-challenge/data/validate_images/",(df2['hashed_id'][i]+'.jpg'))  
+        img = io.imread(img_name)
         class_name = df2['scientific_name'][i]
-        #print(class_name,classes,classes[classes == class_name])
+        if len(img.shape) == 2:
+            found += 1
+            remove2.append(i)
         labels2.append(classes[classes == class_name].index[0])
-    df1['Label'] = labels1
+    print(found)
     df2['Label'] = labels2
-    data_address = "data/"
-    df1.to_csv(os.path.join(data_address,'training_data_with_labels.csv'))
-    df2.to_csv(os.path.join(data_address,'val_data_with_labels.csv'))
-    return df
-
+    df2 = df2.drop(remove2)
+    df2.to_csv(os.path.join(data_address,'processed_validate_labels.csv'))
+        
+    print("start df1")
+    found = 0
+    for i in range(len(df1)):
+        if i % 5000 == 0:
+            print(i)
+        img_name = os.path.join("../snake-species-identification-challenge/data/train_images/",(df1['hashed_id'][i]+'.jpg'))  
+        img = io.imread(img_name)
+        class_name = df1['scientific_name'][i]
+        if len(img.shape) == 2:
+            found += 1
+            remove1.append(i)
+        labels1.append(classes[classes == class_name].index[0])
+    print(found)
+    df1['Label'] = labels1
+    df1 = df1.drop(remove1)
+    df1.to_csv(os.path.join(data_address,'processed_train_labels.csv'))
 
 ### Preprocessing
 class preprocessing():
-    def __init__(self, size=(200,200)):
+    def __init__(self, resize = False, size=(150,150)):
+        self.resize = resize  # if resize or not
         self.size = size # Resize
         self.transform = transforms.Compose([transforms.ToTensor()])   # Add more steps to achieve augmentation
 
     def new_image(self,image):
-        image = transform.resize(image,self.size)
+        if self.resize:
+            image = transform.resize(image,self.size)
+        else:
+            # Transform Uint8 into float64
+            image = img_as_float64(image)
         image = self.transform(image)
         return image
-
 
 
 ### Create Custom Dataset
@@ -73,7 +116,7 @@ class SnakeDataSet(Dataset):
             image_path (str): the path of the folder where images are stored
             preprocess (bool): Whether to preprocess on image
         '''
-        self.data = pd.read_csv(filename)    # The
+        self.data = pd.read_csv(filename,dtype={'hashed_id':str})    # The
         self.id = self.data['hashed_id']       # The hashed ids of the images
         self.labels = self.data['Label']     # The int labels of the images
         self.path = image_path               # The directory the images are
@@ -83,14 +126,50 @@ class SnakeDataSet(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        #(idx)
-        #print(self.id[idx])
+        #print(idx)
+        print(self.id[idx])
         image = io.imread(os.path.join(self.path,(self.id[idx]+'.jpg')))
         if image.shape[2] == 4:
             image = color.rgba2rgb(image)
         label = self.labels[idx]
         if self.preprocess:
             image = self.preprocess.new_image(image)
+        sample = (image, label)
+        return sample
+
+
+### Create Custom Dataset (Old)
+class SnakeDataSet(Dataset):
+    def __init__(self, filename, image_path, preprocess=preprocessing(), resize = False):
+        '''
+        Args:
+            filename (str): filename of the csv that stores the pd.dataframe with the int labels
+            image_path (str): the path of the folder where images are stored
+            preprocess (bool): Whether to preprocess on image
+            resize (bool): Whether to resize the image when read it
+        '''
+        self.data = pd.read_csv(filename)    # The
+        self.id = self.data['hashed_id']       # The hashed ids of the images
+        self.labels = self.data['Label']     # The int labels of the images
+        self.path = image_path               # The directory the images are
+        self.preprocess = preprocess           # The transform performed on the images
+        self.resize = resize                   # Whether resize or not
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        image = io.imread(os.path.join(self.path,(self.id[idx]+'.jpg')))
+        if resize:           # If using raw training images
+            if image.shape[2] == 4:
+                image = color.rgba2rgb(image)
+            if self.preprocess:
+                image = self.preprocess.new_image(image, resize=True)
+        else:               # If using resized images, no need to resize again
+            if self.preprocess:
+                image = self.preprocess.new_image(image)
+
+        label = self.labels[idx]
         sample = (image, label)
         return sample
 
@@ -107,7 +186,7 @@ class BasicNet(nn.Module):
         self.conv2 = nn.Conv2d(in_channels=8, out_channels=8, kernel_size=(3,3), stride=1)
         self.dropout1 = nn.Dropout(0.5)
         self.dropout2 = nn.Dropout(0.5)
-        self.fc1 = nn.Linear(4232, 2000)
+        self.fc1 = nn.Linear(2312, 2000)
         self.fc2 = nn.Linear(2000, 783)
         self.bn = nn.BatchNorm2d(8)
         

@@ -9,7 +9,7 @@ plt.ion()   # interactive mode
 
 
 ### Path settings
-data_address = "../data" # Change this to load files
+data_address = "..\data" # Change this to load files
 train_label_filename = "training_data_with_labels.csv"  # New Training 
 val_label_filename = "val_data_with_labels.csv"
 val_label_small_filename = "validate_labels_small.csv"
@@ -27,7 +27,7 @@ val_dataset = SnakeDataSet(filename=os.path.join(data_address,val_label_filename
 
 ### Load Set to Loader
 train_loader = DataLoader(training_dataset, batch_size=32, sampler = RandomSampler(training_dataset))
-val_loader = DataLoader(val_dataset, batch_size=32, sampler = RandomSampler(val_dataset))
+val_loader = DataLoader(val_dataset, batch_size=10000, sampler = RandomSampler(val_dataset))
 
 # Random Seed
 torch.manual_seed(2020)
